@@ -98,16 +98,72 @@ bss end
 mem_alloc_begin
 ram_end
 
-
 entry:
     1. 配置栈寄存器，进入c环境
 
 start：
     1. 中断配置
-        代理中断，设置epc，etvec等，为mret做准备
-    2. 定时器配置
-        机器模式定时器配置，将机器模式的定时器代理到特权模式
-    3. 
+        代理中断，trap到S模式
+            medeleg：
+                1 ： MSIP
+                5 ： MTIP
+                9 ： MEIP
+            mideleg：
+                0 ： 0-9 12-13 15
+        machine mode:
+            mtvec: 中断向量
+                汇编代码
+                保存现场
+                触发S模式的软件中断
+                设置mtimecompaire
+                恢复现场
+                返回到trap点
+        timer interrupt:
+            scratch register: 在c程序中需要一个register，保存mtime mtimecompare
+            IE TI
+        supervisor mode：
+            start不配置
+
+    2. 特权模式转换成S：
+        mepc：保存main函数的地址
+        模拟函数调用：main的参数， main函数的返回地址设置：a1,a2... ra
+        mpp: 设置为S模式：0：User mode，1：Supervisor mode，3，Machine mode
+        通过mret返回到S
+    
+    3. 配置PMP
+
+kmem.c
+    用于物理内存分配
+    kinit
+    kalloc
+    kfree
+
+proc.c
+    enum state {
+        invalid,
+        running,
+        sleep,
+
+    }
+    struc proc {
+        pid_t pid,
+        void* chan,
+        state state,
+        pagetable* pgtb,
+        void* kstack,
+        struct context* con,
+        trapframe* 
+        struct file ofiles[NFILE]
+    }
+
+main.c
+    线程的概念：初始化只有一个线程，初始化完成后kernel中只有scheduler线程，其他都是进程的kernel态线程
+    trap中的线程：啥概念
+    struct cpu {
+        struct Context context
+    }
+    Cpu cpus[NCPU]
+    
 
 riscv.h
     c语言操作底层硬件，内嵌asm

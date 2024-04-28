@@ -57,3 +57,17 @@ void uart_putc_sync(char c)
 void uart_getc()
 {
 }
+
+void print_uint64(uint64 x)
+{
+  char nums[128];
+  int i = 0;
+  while (x) {
+    char number = x % 10;
+    x = x / 10;
+    nums[i++] = number + '0';
+  }
+  while (i > 0) {
+    uart_putc_sync(nums[--i]);
+  }
+}

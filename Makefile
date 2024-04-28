@@ -1,13 +1,16 @@
 CC = riscv64-unknown-elf-gcc
 AR = riscv64-unknown-elf-gcc-ar
 LD = riscv64-unknown-elf-ld
+OBJDUMP = riscv64-unknown-elf-objdump
 QEMU = qemu-system-riscv64
 
 CFLAGS = -Wall -fno-builtin -ffreestanding -nostdlib -mcmodel=medany -MD
 CFLAGS += -Isrc -ggdb -fno-omit-frame-pointer
-OBJ = src/init/entry.o src/init/start.o src/uart.o # this should be firt
+OBJ = src/init/entry.o src/init/start.o src/uart.o src/kerneltrap.o
+OBJ += src/main.o src/trap.o src/stdlib.o src/swich.o src/proc.o
 kernel : kernel.ld $(OBJ)
 	$(LD) -Tkernel.ld $(OBJ) -o $@
+	$(OBJDUMP) -S $@ > $@.asm
 
 %.o : %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
