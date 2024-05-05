@@ -192,7 +192,15 @@ kmem.c
 
 vm.c
     virtual memory
-    
+    pagetable*
+    pte*
+    vmmap(pagetable*, va, pa, size, flag)
+    walk(pagetable*, va, alloc)
+    freewalk
+    kvminit
+    uvminit
+    pagetable* ptalloc()
+    ptfree()
 proc.c
     process
 
@@ -203,12 +211,12 @@ syscall.c
 main.c
     module init
 
-entry.s
-
-start.c
-
 spinlock.c
 
 file
 
 
+
+设计思路：
+如何保证进程切换正常，以及多核并发不冲突
+识别哪些代码可以打断，哪些代码不可以打断（临界区）
