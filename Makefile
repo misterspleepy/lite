@@ -7,7 +7,8 @@ QEMU = qemu-system-riscv64
 CFLAGS = -Wall -fno-builtin -ffreestanding -nostdlib -mcmodel=medany -MD
 CFLAGS += -Isrc -ggdb -fno-omit-frame-pointer
 OBJ = src/init/entry.o src/init/start.o src/uart.o src/kerneltrap.o
-OBJ += src/main.o src/trap.o src/stdlib.o src/swich.o src/proc.o
+OBJ += src/main.o src/trap.o src/stdlib.o src/swtch.o src/proc.o src/utils.o
+OBJ += src/kmem.o src/vm.o src/spinlock.o src/syscall.o src/trampoline.o
 kernel : kernel.ld $(OBJ)
 	$(LD) -Tkernel.ld $(OBJ) -o $@
 	$(OBJDUMP) -S $@ > $@.asm
@@ -15,7 +16,7 @@ kernel : kernel.ld $(OBJ)
 %.o : %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-%.o : %.s
+%.o : %.S
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 QFLAGS = \

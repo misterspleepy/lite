@@ -58,8 +58,11 @@ void uart_getc()
 {
 }
 
-void print_uint64(uint64 x)
+void print_int(uint64 x)
 {
+  if (x == 0) {
+    uart_putc_sync('0');
+  }
   char nums[128];
   int i = 0;
   while (x) {
@@ -70,4 +73,31 @@ void print_uint64(uint64 x)
   while (i > 0) {
     uart_putc_sync(nums[--i]);
   }
+}
+
+void print_hex(uint64 x)
+{
+  char nums[128];
+  int i = 0;
+  while (x) {
+    char number = x % 16;
+    x = x / 16;
+    if (number < 10) {
+      nums[i++] = number + '0';
+    } else {
+      nums[i++] = number - 10 + 'A';
+    }
+  }
+  uart_putc_sync('0');
+  uart_putc_sync('x');
+  while (i > 0) {
+    uart_putc_sync(nums[--i]);
+  }
+}
+
+void print_str(const char* msg)
+{
+    for (const char* c = msg; *c != 0; c++) {
+        uart_putc_sync(*c);
+    }
 }

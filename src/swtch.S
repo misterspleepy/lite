@@ -1,8 +1,6 @@
-.text
-.global swich
+.global swtch
 
-/* switch(context* src, context* target) */
-swich:
+swtch:
     sd ra, 0(a0)
     sd sp, 8(a0)
     sd s0, 16(a0)
@@ -32,5 +30,5 @@ swich:
     ld s9, 88(a1)
     ld s10, 96(a1)
     ld s11, 104(a1)
-
+    
     ret
