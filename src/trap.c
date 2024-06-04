@@ -79,7 +79,7 @@ void userret(uint64 satp);
 void usertrapret()
 {
     uint64 satp;
-    proc* p = myproc();
+    proc_t* p = myproc();
     // 停用中断，等待到usermode的时候才开启
     dis_intr();
     // 设置中断handler为uservec

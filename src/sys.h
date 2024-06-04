@@ -14,16 +14,16 @@ typedef struct {
     uint64 locked;
     uint64 cpu;
     char* name;
-} spinlock;
+} spinlock_t;
 
 typedef uint64 pte;
 typedef pte* pagetable_t;
 
 // spinlock
-void lock_init(spinlock* lk, char* name);
-void lock_acquire(spinlock* lk);
-void lock_release(spinlock* lk);
-uint64 lock_holding(spinlock* lk);
+void lock_init(spinlock_t* lk, char* name);
+void lock_acquire(spinlock_t* lk);
+void lock_release(spinlock_t* lk);
+uint64 lock_holding(spinlock_t* lk);
 
 void push_off();
 void pop_off();
@@ -96,25 +96,26 @@ typedef enum procstate_t {
     USED,
     RUNNABLE,
     RUNNING,
-    SLEEP
+    SLEEPING
 };
 
 typedef uint32 pid_t;
 typedef struct {
-    // protected by procs_table.lk
     pid_t pid;
     enum procstate_t state;
+    void* chan; // sleeping channel
+    spinlock_t lk;
 
     pagetable_t pagetable;
     context_t context;
     void* kstack;
     char name[NBUF];
     trapframe_t* trapframe;
-} proc;
+} proc_t;
 
 typedef struct cpu_t {
     context_t context;
-    proc* p;
+    proc_t* p;
 
     // this is process privite data, why not move it to proc
     uint64 noff;
@@ -125,7 +126,9 @@ void cpu_init();
 void proc_init();
 void scheduler();
 cpu_t* mycpu();
-proc* myproc();
+proc_t* myproc();
+void sleep(void* chan, spinlock_t* lk);
+void wakeup(void* chan);
 
 // string utils
 char* strcpy(char *dest, const char *src);

@@ -1,12 +1,11 @@
 #include "sys.h"
 
 static struct {
-    spinlock lk;
-    proc procs[NPROC];
+    proc_t procs[NPROC];
 } procs_table;
 
 static struct {
-    spinlock lk;
+    spinlock_t lk;
     pid_t next_pid;
 } npid;
 
@@ -33,29 +32,29 @@ pid_t alloc_pid()
 }
 
 // null for failed.
-proc* alloc_proc()
+proc_t* alloc_proc()
 {
-    lock_acquire(&procs_table.lk);
     for (int i = 0; i < NPROC; i++) {
+        lock_acquire(&procs_table.procs[i].lk);
         if (procs_table.procs[i].state == UNUSED) {
             procs_table.procs[i].state = USED;
             procs_table.procs[i].pid = alloc_pid();
-            lock_release(&procs_table.lk);
+            lock_release(&procs_table.procs[i].lk);
             return &procs_table.procs[i];
         }
+        lock_release(&procs_table.procs[i].lk);
     }
-    lock_release(&procs_table.lk);
     return 0;
 }
 
 void proc_init()
 {
     lock_init(&npid.lk, "pid counter");
-    lock_init(&procs_table.lk, "procs_table");
     for (int i = 0; i < NPROC; i++) {
         procs_table.procs[i].pid = 0;
         procs_table.procs[i].state = UNUSED;
         procs_table.procs[i].kstack = 0;
+        lock_init(&procs_table.procs[i].lk, "proc");
         memset((void*)(&procs_table.procs[i].context), 0, sizeof(context_t));
         memset(procs_table.procs[i].name, 0, NBUF);
     }
@@ -68,19 +67,69 @@ cpu_t* mycpu()
     return &cpus[hid];
 }
 
-proc* myproc()
+proc_t* myproc()
 {
     return mycpu()->p;
 }
 
-// yield must be called in interrupt disable
-void yield()
+// should hold myproc()->lock
+// proc's status should change in outside
+void sched()
 {
+    proc_t* proc = myproc();
+    if (!lock_holding(&proc->lk)) {
+        panic("sched should hold proc lock\n");
+    }
     uint64 noff = mycpu()->noff;
     uint64 sie = mycpu()->sie;
+    lock_release(&proc->lk);
     swtch(&myproc()->context, &mycpu()->context);
     mycpu()->noff = noff;
     mycpu()->sie = sie;
+    lock_acquire(&proc->lk);
+}
+
+
+// yield must be called in interrupt disable
+void yield()
+{
+    proc_t* proc = myproc();
+    lock_acquire(&proc->lk);
+    if (proc->state != RUNNING) {
+        panic("yield\n");
+    }
+    proc->state = RUNNABLE;
+    sched();
+    lock_release(&proc->lk);
+}
+
+void sleep(void* chan, spinlock_t* lk)
+{
+    proc_t* proc = myproc();
+    if (!lock_holding(lk)) {
+        panic("sleep");
+    }
+    lock_acquire(&proc->lk);
+    proc->chan = chan;
+    proc->state = SLEEPING;
+    lock_release(lk);
+    sched();
+    lock_release(&proc->lk);
+    lock_acquire(lk);
+}
+
+void wakeup(void *chan)
+{
+    for (int i = 0; i < NPROC; i++) {
+        if (&procs_table.procs[i] == myproc()) {
+            continue;
+        }
+        lock_acquire(&procs_table.procs[i].lk);
+        if (procs_table.procs[i].state == SLEEPING && procs_table.procs[i].chan == chan) {
+            procs_table.procs[i].state = RUNNABLE;
+        }
+        lock_release(&procs_table.procs[i].lk);
+    }
 }
 
 void scheduler()
@@ -89,19 +138,17 @@ void scheduler()
     while (1) {
         en_intr();
         dis_intr();
-        lock_acquire(&procs_table.lk);
         for (int i = 0; i < NPROC; i++) {
-            volatile proc* p =  &procs_table.procs[i];
+            volatile proc_t* p =  &procs_table.procs[i];
+            lock_acquire(&p->lk);
             if (p->state != RUNNABLE) {
+                lock_release(&p->lk);
                 continue;
             }
             cpu->p = p;
             p->state = RUNNING;
-            lock_release(&procs_table.lk);
+            lock_release(&p->lk);
             swtch(&cpu->context, &p->context);
-            lock_acquire(&procs_table.lk);
-            p->state = RUNNABLE;
-            lock_release(&procs_table.lk);
             cpu->p = 0;
         }
     }
@@ -119,7 +166,7 @@ uint8 initcode[] = {
 
 void userinit()
 {
-    proc* up = alloc_proc();
+    proc_t* up = alloc_proc();
     // setup kstack
     up->kstack = kalloc();
     // setup trapframe
@@ -135,9 +182,9 @@ void userinit()
     up->trapframe->epc = 0;
     mappages(up->pagetable, TRAP_FRAME, up->trapframe, PAGE_SIZE, PTE_R | PTE_W);
 
-    lock_acquire(&procs_table.lk);
+    lock_acquire(&up->lk);
     up->state = RUNNABLE;
-    lock_release(&procs_table.lk);
+    lock_release(&up->lk);
 }
 
 void uvmfirst(pagetable_t pgtable, const uint8* initcode, size_t size)
