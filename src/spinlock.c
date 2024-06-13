@@ -1,6 +1,6 @@
 #include "sys.h"
 
-void lock_init(spinlock_t* lk, char* name)
+void lock_init(spinlock_t* lk, const char* name)
 {
     lk->cpu = 0;
     lk->locked = 0;

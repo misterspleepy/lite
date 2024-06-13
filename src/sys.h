@@ -13,14 +13,14 @@ extern uint32 ticks;
 typedef struct {
     uint64 locked;
     uint64 cpu;
-    char* name;
+    const char* name;
 } spinlock_t;
 
 typedef uint64 pte;
 typedef pte* pagetable_t;
 
 // spinlock
-void lock_init(spinlock_t* lk, char* name);
+void lock_init(spinlock_t* lk, const char* name);
 void lock_acquire(spinlock_t* lk);
 void lock_release(spinlock_t* lk);
 uint64 lock_holding(spinlock_t* lk);
@@ -96,7 +96,8 @@ typedef enum procstate_t {
     USED,
     RUNNABLE,
     RUNNING,
-    SLEEPING
+    SLEEPING,
+    ZOMBIE
 };
 
 typedef uint32 pid_t;
@@ -106,6 +107,7 @@ typedef struct {
     void* chan; // sleeping channel
     spinlock_t lk;
 
+    char killed;
     pagetable_t pagetable;
     context_t context;
     void* kstack;
@@ -125,10 +127,19 @@ typedef struct cpu_t {
 void cpu_init();
 void proc_init();
 void scheduler();
+uint64 cpuid();
 cpu_t* mycpu();
 proc_t* myproc();
 void sleep(void* chan, spinlock_t* lk);
 void wakeup(void* chan);
+char killed(proc_t* p);
+void setkilled(proc_t* p);
+
+typedef struct {
+    uint32 ticks;
+    spinlock_t lk;
+} time_t;
+extern time_t time;
 
 // string utils
 char* strcpy(char *dest, const char *src);
@@ -160,3 +171,48 @@ void usertrapret();
 
 // syscall
 void syscall();
+
+// sleep_lock.h
+typedef struct {
+    int32 locked;
+    spinlock_t spinlock;
+    proc_t* myproc;
+    const char* name;
+} sleeplock_t;
+void sleeplock_init(sleeplock_t* lk, const char* name);
+void sleeplock_acquire(sleeplock_t* lk);
+void sleeplock_release(sleeplock_t* lk);
+int32 sleeplock_holding(sleeplock_t* lk);
+
+// bio
+#define BLOCK_SIZE 1024
+struct buf {
+    struct buf* prev;
+    struct buf* next;
+    int32 ref_count;
+    int32 dev;
+    int32 block_num;
+
+    sleeplock_t slk;
+    int32 is_valid;
+    int32 disk;
+    char data[BLOCK_SIZE];
+};
+typedef struct buf buf_t;
+void binit();
+buf_t* bread(int32 dev, int32 block_num);
+void bwrite(buf_t* buf);
+void brelease(buf_t* buf);
+void bpin(buf_t *b);
+void bunpin(buf_t *b);
+
+// virtio_disk
+void virtio_disk_rw(buf_t* buf, int32 write);
+void virtio_disk_init();
+void virtio_disk_intr();
+
+// plic
+void plic_init();
+void plic_inithart();
+int plic_claim(void);
+void plic_complete(int irq);

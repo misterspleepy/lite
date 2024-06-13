@@ -3,11 +3,17 @@ void kernelvec();
 extern uint32 ticks;
 __attribute__((aligned (16))) void main() 
 {
+    lock_init(&time.lk, "time");
+    time.ticks = 0;
     cpu_init();
     kinit();
     w_stvec((uint64)kernelvec);
-    uart_init();
     kvminit();
     proc_init();
+    plic_init();
+    plic_inithart();
+    uart_init();
+    binit();
+    virtio_disk_init();
     scheduler();
 }

@@ -1,11 +1,13 @@
 #include "sys.h"
 #define TIME_INTR 1
 #define EXTERN_INTR 2
-
-uint32 ticks = 0;
+time_t time;
 void timerintr()
 {
-    ticks++;
+    lock_acquire(&time.lk);
+    time.ticks++;
+    lock_release(&time.lk);
+    wakeup(&time);
 }
 extern uint64 timestamp;
 void yield();
@@ -19,19 +21,26 @@ uint64 devinterrupt(uint64 cause)
     if (cause == 0x8000000000000009) {
         // supervisor external interrupt
         // PLIC things
+        int irq = plic_claim();
+        if (irq == VIRTIO0_IRQ) {
+            virtio_disk_intr();
+        }
         return EXTERN_INTR;
     }
     return 0;
 }
+
+// 在中断函数中得判断myproc（）是否为空，确定中断的来源
 void ktrap()
 {
+    // myproc() may be 0, interrupt from scheduler 
     volatile uint64 cause = r_scause();
     int whichdev = devinterrupt(cause);
     if (whichdev == 0) {
         // unknown exceptions, should print the message.
         panic("unknown exceptions");
     }
-    if (whichdev == TIME_INTR) {
+    if (whichdev == TIME_INTR && myproc()) {
         yield();
     }
 }

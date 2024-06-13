@@ -39,6 +39,8 @@ proc_t* alloc_proc()
         if (procs_table.procs[i].state == UNUSED) {
             procs_table.procs[i].state = USED;
             procs_table.procs[i].pid = alloc_pid();
+            procs_table.procs[i].killed = 0;
+            procs_table.procs[i].chan = 0;
             lock_release(&procs_table.procs[i].lk);
             return &procs_table.procs[i];
         }
@@ -54,11 +56,18 @@ void proc_init()
         procs_table.procs[i].pid = 0;
         procs_table.procs[i].state = UNUSED;
         procs_table.procs[i].kstack = 0;
+        procs_table.procs[i].killed = 0;
+        procs_table.procs[i].chan = 0;
         lock_init(&procs_table.procs[i].lk, "proc");
         memset((void*)(&procs_table.procs[i].context), 0, sizeof(context_t));
         memset(procs_table.procs[i].name, 0, NBUF);
     }
     userinit();
+}
+
+uint64 cpuid()
+{
+    return r_tp();
 }
 
 cpu_t* mycpu()
@@ -82,8 +91,9 @@ void sched()
     }
     uint64 noff = mycpu()->noff;
     uint64 sie = mycpu()->sie;
+    mycpu()->p = 0; // important!
     lock_release(&proc->lk);
-    swtch(&myproc()->context, &mycpu()->context);
+    swtch(&proc->context, &mycpu()->context);
     mycpu()->noff = noff;
     mycpu()->sie = sie;
     lock_acquire(&proc->lk);
@@ -149,7 +159,6 @@ void scheduler()
             p->state = RUNNING;
             lock_release(&p->lk);
             swtch(&cpu->context, &p->context);
-            cpu->p = 0;
         }
     }
 }
@@ -196,4 +205,14 @@ void uvmfirst(pagetable_t pgtable, const uint8* initcode, size_t size)
         panic("uvmfirst\n");
     }
     copyout(pgtable, 0, initcode, size);
+}
+
+char killed(proc_t* p)
+{
+    return p->killed;
+}
+
+void setkilled(proc_t* p)
+{
+    p->killed = 1;
 }
