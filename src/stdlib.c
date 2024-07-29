@@ -38,3 +38,17 @@ memmove(void *dst, const void *src, size_t n)
 
   return dst;
 }
+
+void* memcpy(void *dst, const void *src, uint32 n)
+{
+  return memmove(dst, src, n);
+}
+
+int strlen(const char *s)
+{
+  int n;
+
+  for(n = 0; s[n]; n++)
+    ;
+  return n;
+}

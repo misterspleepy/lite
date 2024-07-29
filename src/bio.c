@@ -81,8 +81,8 @@ void brelease(buf_t* buf)
     if (!sleeplock_holding(&buf->slk)) {
         panic("brelease\n");
     }
-    sleeplock_release(&buf->slk);
     lock_acquire(&bcache.lk);
+    sleeplock_release(&buf->slk);
     buf->ref_count--;
     if (buf->ref_count == 0) {
         buf->prev->next = buf->next;

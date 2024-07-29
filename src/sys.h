@@ -2,6 +2,7 @@
 #include "conf.h"
 #include "memlayout.h"
 #include "riscv.h"
+#include "fs.h"
 extern char __TRAMPOLINE[];
 extern char __TEXT_BEGIN[];
 extern char __TEXT_END[];
@@ -16,8 +17,8 @@ typedef struct {
     const char* name;
 } spinlock_t;
 
-typedef uint64 pte;
-typedef pte* pagetable_t;
+typedef uint64 pte_t;
+typedef pte_t* pagetable_t;
 
 // spinlock
 void lock_init(spinlock_t* lk, const char* name);
@@ -107,8 +108,10 @@ typedef struct {
     void* chan; // sleeping channel
     spinlock_t lk;
 
+    inode_t* pwd;
     char killed;
     pagetable_t pagetable;
+    uint64 sz; // va size
     context_t context;
     void* kstack;
     char name[NBUF];
@@ -134,7 +137,7 @@ void sleep(void* chan, spinlock_t* lk);
 void wakeup(void* chan);
 char killed(proc_t* p);
 void setkilled(proc_t* p);
-
+void forkret();
 typedef struct {
     uint32 ticks;
     spinlock_t lk;
@@ -145,8 +148,10 @@ extern time_t time;
 char* strcpy(char *dest, const char *src);
 void* memset(void *str, int c, size_t n);
 void* memmove(void *dst, const void *src, size_t n);
+int strlen(const char *s);
 // 串口
 void uart_putc_sync(char c);
+void uart_putc(char c);
 void print_int(uint64 x);
 void print_hex(uint64 x);
 void print_str(const char* msg);
@@ -164,6 +169,7 @@ void kvminit();
 extern pagetable_t kernel_page_table;
 void mappages(pagetable_t pgtable, uint64 va, uint64 pa, uint64 size, uint8 flag);
 void freewalk(pagetable_t pagetable);
+void uvmclear(pagetable_t ptb, uint64 va);
 
 // trap
 void kernelvec();
@@ -184,8 +190,17 @@ void sleeplock_acquire(sleeplock_t* lk);
 void sleeplock_release(sleeplock_t* lk);
 int32 sleeplock_holding(sleeplock_t* lk);
 
+typedef struct inode {
+    uint32 ino;
+    uint32 dev;
+    uint32 refcount;
+    sleeplock_t lock;
+    char valid;
+    dinode_t dinode;
+} inode_t;
+
+
 // bio
-#define BLOCK_SIZE 1024
 struct buf {
     struct buf* prev;
     struct buf* next;
@@ -216,3 +231,16 @@ void plic_init();
 void plic_inithart();
 int plic_claim(void);
 void plic_complete(int irq);
+
+uint64 copyout(pagetable_t pagetable, uint64 dstva, uint64 src, uint64 size);
+uint64 copyin(pagetable_t pg, uint64 dst, uint64 srcva, uint64 size);
+uint64 copyinstr(pagetable_t pg, uint64 dst, uint64 srcva, uint64 max);
+uint64 eithercopyin(short user, uint64 dst, uint64 srcva, uint64 size);
+uint64 eithercopyout(short user, uint64 dstva, uint64 src, uint64 size);
+void uvmfree(pagetable_t ptb, uint64 size);
+uint64 uvmalloc(pagetable_t pgtable, uint64 oldsz, uint64 newsz, uint8 xperm);
+uint64 walkaddr(pagetable_t pgtable, uint64 va);
+void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free);
+
+void console_init();
+void uartintr();

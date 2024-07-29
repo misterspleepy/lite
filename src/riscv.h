@@ -43,11 +43,11 @@
 #define PTE2PA(pte) ((pte >> 10) << 12)
 #define PA2PTE(pa) ((pa >> 12) << 10)
 #define VPN(va, i) ((va >> (9 * i + 12)) & 0x1ff)
+#define PTE_FLAGS(pte) ((pte) & 0x3FF)
 
 #ifndef __ASSEMBLER__
 // only c code can include these funcs
-static inline uint64
-r_mstatus()
+static inline uint64 r_mstatus()
 {
   uint64 x;
   asm volatile("csrr %0, mstatus" : "=r" (x) );
@@ -177,6 +177,14 @@ static inline void
 w_sepc(uint64 x)
 {
   asm volatile("csrw sepc, %0" : : "r" (x)); 
+}
+
+static inline uint64
+r_sepc()
+{
+  uint64 x;
+  asm volatile("csrr %0, sepc" : "=r" (x) );
+  return x;
 }
 
 static inline void

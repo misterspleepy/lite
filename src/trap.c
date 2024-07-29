@@ -24,7 +24,10 @@ uint64 devinterrupt(uint64 cause)
         int irq = plic_claim();
         if (irq == VIRTIO0_IRQ) {
             virtio_disk_intr();
+        } else if(irq == UART0_IRQ){
+            uartintr();
         }
+        plic_complete(irq);
         return EXTERN_INTR;
     }
     return 0;
@@ -35,6 +38,8 @@ void ktrap()
 {
     // myproc() may be 0, interrupt from scheduler 
     volatile uint64 cause = r_scause();
+    uint64 sepc = r_sepc();
+    uint64 sstatus = r_sstatus();
     int whichdev = devinterrupt(cause);
     if (whichdev == 0) {
         // unknown exceptions, should print the message.
@@ -43,6 +48,8 @@ void ktrap()
     if (whichdev == TIME_INTR && myproc()) {
         yield();
     }
+    w_sepc(sepc);
+    w_sstatus(sstatus);
 }
 
 // uservec execute "j usertrap"
@@ -53,7 +60,6 @@ void usertrap()
 {
     // switch trap handler to kernelvec
     w_stvec((uint64)kernelvec);
-
     // setup noff, this is critial to spinlock
     mycpu()->noff = 0;
     // handle device interrupts or exceptions

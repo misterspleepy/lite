@@ -35,6 +35,9 @@ uint64 lock_holding(spinlock_t* lk)
 
 void push_off()
 {
+    if (mycpu() == 0) {
+        panic("push_off");
+    }
     if (mycpu()->noff == 0) {
         mycpu()->sie = r_sstatus() & SSTATUS_SIE;
         dis_intr();

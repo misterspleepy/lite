@@ -1,4 +1,5 @@
 #include "sys.h"
+
 void kernelvec();
 extern uint32 ticks;
 __attribute__((aligned (16))) void main() 
@@ -12,7 +13,7 @@ __attribute__((aligned (16))) void main()
     proc_init();
     plic_init();
     plic_inithart();
-    uart_init();
+    console_init();
     binit();
     virtio_disk_init();
     scheduler();

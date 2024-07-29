@@ -1,5 +1,5 @@
 #include "sys.h"
-
+#include "elf.h"
 static struct {
     proc_t procs[NPROC];
 } procs_table;
@@ -91,12 +91,9 @@ void sched()
     }
     uint64 noff = mycpu()->noff;
     uint64 sie = mycpu()->sie;
-    mycpu()->p = 0; // important!
-    lock_release(&proc->lk);
     swtch(&proc->context, &mycpu()->context);
     mycpu()->noff = noff;
     mycpu()->sie = sie;
-    lock_acquire(&proc->lk);
 }
 
 
@@ -104,6 +101,9 @@ void sched()
 void yield()
 {
     proc_t* proc = myproc();
+    if (proc == 0) {
+        panic("yield");
+    }
     lock_acquire(&proc->lk);
     if (proc->state != RUNNING) {
         panic("yield\n");
@@ -120,9 +120,9 @@ void sleep(void* chan, spinlock_t* lk)
         panic("sleep");
     }
     lock_acquire(&proc->lk);
+    lock_release(lk);
     proc->chan = chan;
     proc->state = SLEEPING;
-    lock_release(lk);
     sched();
     lock_release(&proc->lk);
     lock_acquire(lk);
@@ -157,8 +157,9 @@ void scheduler()
             }
             cpu->p = p;
             p->state = RUNNING;
-            lock_release(&p->lk);
             swtch(&cpu->context, &p->context);
+            cpu->p = 0;
+            lock_release(&p->lk);
         }
     }
 }
@@ -185,8 +186,9 @@ void userinit()
     // alloc & setup page table
     up->pagetable = kalloc();
     uvmfirst(up->pagetable, initcode, sizeof(initcode));
+    up->sz = PAGE_SIZE;
     // arrange for user program run
-    up->context.ra = (uint64)usertrapret;
+    up->context.ra = (uint64)forkret;
     up->context.sp = (uint64)up->kstack + PAGE_SIZE;
     up->trapframe->epc = 0;
     mappages(up->pagetable, TRAP_FRAME, up->trapframe, PAGE_SIZE, PTE_R | PTE_W);
@@ -215,4 +217,168 @@ char killed(proc_t* p)
 void setkilled(proc_t* p)
 {
     p->killed = 1;
+}
+
+void forkret()
+{
+    static int firt = 1;
+    lock_release(&myproc()->lk);
+    if (firt) {
+        // File system initialization must be run in the context of a
+        // regular process (e.g., because it calls sleep), and thus cannot
+        // be run from main().
+        firt = 0;
+        fsinit(0);
+    }
+    usertrapret();
+}
+
+int flags2perm(int flags)
+{
+    int perm = 0;
+    if(flags & ELF_PROG_FLAG_EXEC)
+      perm = PTE_X;
+    if(flags & ELF_PROG_FLAG_WRITE)
+      perm |= PTE_W;
+    if(flags & ELF_PROG_FLAG_READ)
+      perm |= PTE_R;
+    return perm;
+}
+
+int exec(const char* path, char* args[])
+{
+    proc_t* p = myproc();
+    struct elfhdr eh;
+    struct proghdr phd;
+    pagetable_t newptb, oldtb;
+    char* ustack[ARGSMAX];
+    uint64 sz = 0, filesz = 0, pa, fileoff, paddr, sp, spbase, oldsz, argc;
+    uint64 tsz;
+    const char *last, *s;
+    inode_t* ip = namei(path);
+    if (ip == 0) {
+        kprintf("exec %s failed, file not found.", path);
+        return -1;
+    }
+    ilock(ip);
+    iread(ip, 0, (char*)&eh, sizeof(eh), 0);
+    if (eh.magic != ELF_MAGIC) {
+        kprintf("exec %s failed, invalid format.", path);
+        goto exec_bad;
+    }
+    newptb = kalloc();
+    if (newptb == 0) {
+        kprintf("exec %s failed, alloc memory failed.", path);
+        goto exec_bad;
+    }
+    mappages(newptb,TRAMPOLINE, __TRAMPOLINE, PAGE_SIZE, PTE_R | PTE_X);
+    mappages(newptb, TRAP_FRAME, p->trapframe, PAGE_SIZE, PTE_R | PTE_W);
+    // load file
+    for (int i = 0; i < eh.phnum; i++) {
+        if (iread(ip, 0, (char*)&phd, sizeof(phd), eh.phoff + i * eh.phentsize) != sizeof(phd)) {
+            kprintf("exec %s failed, read program header entry failed", path);
+            goto exec_bad;
+        }
+        if (phd.type != ELF_PROG_LOAD) {
+            continue;
+        }
+        if ((sz = uvmalloc(newptb, sz, phd.paddr + phd.memsz, flags2perm(phd.flags))) != phd.paddr + phd.memsz) {
+            kprintf("exec %s failed, read program header entry failed", path);
+            goto exec_bad;
+        }
+        fileoff = phd.off;
+        paddr = phd.paddr;
+        pa = walkaddr(newptb, paddr);
+        pa += phd.paddr & (PAGE_SIZE - 1);
+        filesz = phd.filesz;
+        tsz = MIN(PAGE_SIZE - (phd.paddr & (PAGE_SIZE - 1)), filesz);
+        while (1) {
+            if (iread(ip, 0, pa, tsz, fileoff) != tsz) {
+                kprintf("exec %s failed, can't load program segment.", path);
+                goto exec_bad;
+            }
+            filesz -= tsz;
+            if (filesz == 0) {
+                break;
+            }
+            fileoff += tsz;
+            paddr += tsz;
+            if (paddr & (PAGE_SIZE - 1)) {
+                panic("exec");
+            }
+            pa = walkaddr(newptb, paddr);
+            tsz = MIN(PAGE_SIZE, filesz);
+        }
+    }
+    // setup stack
+    if (uvmalloc(newptb, sz, 
+        PAGE_ROUNDUP(sz) + 2 * PAGE_SIZE, PTE_R | PTE_W) != PAGE_ROUNDUP(sz) + 2 * PAGE_SIZE) {
+        goto exec_bad;
+    }
+    sz = PAGE_ROUNDUP(sz) + 2 * PAGE_SIZE;
+    iunlock(ip);
+    iput(ip);
+    uvmclear(newptb, sz - 2 * PAGE_SIZE); // set up stack gard, prevent from stack overflow
+    sp = sz;
+    spbase = sp - PAGE_SIZE;
+    argc = 0;
+    for (argc = 0; args[argc] != 0; argc++) {
+        if (argc >= ARGSMAX) {
+            break;
+        }
+        sp -= strlen(args[argc]) + 1;
+        sp -= sp % 16; // stack shold be 16 byte alignment
+        if (sp < spbase) {
+            kprintf("alloc args failed, sp:%p, spbase:%p\n", sp, spbase);
+            goto exec_bad;
+        }
+        if (copyout(newptb, sp, args[argc],
+            strlen(args[argc]) + 1) != 0) {
+            kprintf("copyout failed\n");
+            goto exec_bad;
+        }
+        ustack[argc] = (char*)sp;
+    }
+    sp -= sizeof(char*) * (argc + 1);
+    sp -= sp % 16;
+    if (sp < spbase) {
+        kprintf("exec failed, failed to alloc args");
+        goto exec_bad;
+    }
+    if (copyout(newptb, sp, ustack,
+        sizeof(char*) * (argc + 1)) != 0) {
+        kprintf("exec failed, failed to copy out utack");
+        goto exec_bad;
+    }
+    p->trapframe->a1 = sp;
+    // Save program name for debugging.
+    for(last=s=path; *s; s++) {
+        if(*s == '/') {
+            last = s+1;
+        }
+    }
+    strcpy(p->name, last);
+    // Commit to the user image.
+    oldtb = p->pagetable;
+    oldsz = p->sz;
+    p->pagetable = newptb;
+    p->sz = sz;
+    p->trapframe->epc = eh.entry;  // initial program counter = main
+    p->trapframe->sp = sp; // initial stack pointer
+    uvmfree(oldtb, oldsz);
+    p->trapframe->epc = eh.entry;
+    return argc;
+exec_bad:
+    if (newptb) {
+        uvmfree(newptb, sz);
+    }
+    if (sleeplock_holding(&ip->lock)) {
+        iunlock(ip);
+        iput(ip);
+    }
+    while (*args) {
+        kfree(*args);
+        args++;
+    }
+    return -1;
 }
