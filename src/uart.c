@@ -1,5 +1,5 @@
 #include "memlayout.h"
-#include "type.h"
+#include "sys.h"
 #define Reg(reg) ((volatile unsigned char *)(UART0_BASE + reg))
 #define ReadReg(reg) (*(Reg(reg)))
 #define WriteReg(reg, v) (*(Reg(reg)) = (v))
@@ -20,6 +20,14 @@
 #define LSR_TX_IDLE (1<<5)    // THR can accept another character to send
 
 #define LCR_THRE 5
+
+#define TX_BUF_SIZE 8
+static struct {
+  uint32 r;
+  uint32 w;
+  char buf[TX_BUF_SIZE];
+  spinlock_t lock;
+} uart_tx_buf;
 
 void uart_init()
 {
@@ -45,59 +53,69 @@ void uart_init()
   // enable transmit and receive interrupts.
   WriteReg(IER, IER_TX_ENABLE | IER_RX_ENABLE);
 
+  lock_init(&uart_tx_buf.lock, "uart tx bif log");
+  uart_tx_buf.r = 0;
+  uart_tx_buf.w = 0;
 }
 
 void uart_putc_sync(char c)
 {
-    while (!(ReadReg(LSR) | (1 << LCR_THRE)))
-    {}
+  push_off();
+  while (!(ReadReg(LSR) & LSR_TX_IDLE))
+  {}
+  WriteReg(THR, c);
+  pop_off();
+}
+
+// uart_tx_buf.lock need to be holded
+void uart_start()
+{
+  char c;
+  while (1) {
+    if (uart_tx_buf.r == uart_tx_buf.w) {
+      return;
+    }
+    if ((ReadReg(LSR) & LSR_TX_IDLE) == 0) {
+      return;
+    }
+    c = uart_tx_buf.buf[(uart_tx_buf.r++) % TX_BUF_SIZE];
+    wakeup(&uart_tx_buf.r);
     WriteReg(THR, c);
-}
-
-void uart_getc()
-{
-}
-
-void print_int(uint64 x)
-{
-  if (x == 0) {
-    uart_putc_sync('0');
-  }
-  char nums[128];
-  int i = 0;
-  while (x) {
-    char number = x % 10;
-    x = x / 10;
-    nums[i++] = number + '0';
-  }
-  while (i > 0) {
-    uart_putc_sync(nums[--i]);
   }
 }
 
-void print_hex(uint64 x)
+void uart_putc(char c)
 {
-  char nums[128];
-  int i = 0;
-  while (x) {
-    char number = x % 16;
-    x = x / 16;
-    if (number < 10) {
-      nums[i++] = number + '0';
-    } else {
-      nums[i++] = number - 10 + 'A';
+  lock_acquire(&uart_tx_buf.lock);
+  while(uart_tx_buf.r + TX_BUF_SIZE ==  uart_tx_buf.w) {
+    sleep(&uart_tx_buf.r, &uart_tx_buf.lock);
+  }
+  uart_tx_buf.buf[(uart_tx_buf.w++) % TX_BUF_SIZE] = c;
+  uart_start();
+  lock_release(&uart_tx_buf.lock);
+}
+
+int uart_getc()
+{
+  if (ReadReg(LSR) & LSR_RX_READY) {
+    return ReadReg(RHR);
+  }
+  return -1;
+}
+
+extern void console_int(int);
+
+void uartintr()
+{
+  int c;
+  while (1) {
+    c = uart_getc();
+    if (c == -1) {
+      break;
     }
+    console_intr(c);
   }
-  uart_putc_sync('0');
-  uart_putc_sync('x');
-  while (i > 0) {
-    uart_putc_sync(nums[--i]);
-  }
-}
-
-void print_str(const char* msg)
-{
-    for (const char* c = msg; *c != 0; c++) {
-        uart_putc_sync(*c);
-    }
+  lock_acquire(&uart_tx_buf.lock);
+  uart_start();
+  lock_release(&uart_tx_buf.lock);
 }

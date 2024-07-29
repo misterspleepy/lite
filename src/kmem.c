@@ -6,7 +6,7 @@ struct run {
 };
 typedef struct run run;
 struct {
-    spinlock lk;
+    spinlock_t lk;
     run* head;
 } kmempool;
 
